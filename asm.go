@@ -8,11 +8,24 @@ import (
 )
 
 func main() {
+	// Shuffle128
+	TEXT("Shuffle128", NOSPLIT, "func(shuffle, data []byte, out []uint32)")
+	Doc("Shuffle 32 bits integer with XMM register")
+	shufflePtr := Load(Param("shuffle").Base(), GP64())
+	dataPtr := Load(Param("data").Base(), GP64())
+	outPtr := Load(Param("out").Base(), GP64())
+	xmm := XMM()
+	VMOVDQU(Mem{Base: dataPtr}, xmm)
+	PSHUFB(Mem{Base: shufflePtr}, xmm)
+	VMOVDQU(xmm, Mem{Base: outPtr})
+	RET()
+
+	// Shuffle256
 	TEXT("Shuffle256", NOSPLIT, "func(masks, data []byte, offset int, out []uint32)")
 	Doc("Shuffle 32 bits integer with YMM register")
 	masksPtr := Load(Param("masks").Base(), GP64())
-	dataPtr := Load(Param("data").Base(), GP64())
-	outPtr := Load(Param("out").Base(), GP64())
+	dataPtr = Load(Param("data").Base(), GP64())
+	outPtr = Load(Param("out").Base(), GP64())
 
 	Comment("ShuffleTable[256][16]")
 	shuffleTable := Mem{Base: GP64()}

@@ -58,6 +58,13 @@ func TestUint32Decode256(t *testing.T) {
 	}
 }
 
+func BenchmarkUint32Decode128(b *testing.B) {
+	out := make([]uint32, 8)
+	for n := 0; n < b.N; n++ {
+		Uint32Decode128(masks, data, out)
+	}
+}
+
 func BenchmarkShuffle128(b *testing.B) {
 	out := make([]uint32, 8)
 	for n := 0; n < b.N; n++ {

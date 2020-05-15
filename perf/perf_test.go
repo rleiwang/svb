@@ -31,20 +31,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func BenchmarkUint32Decode128(b *testing.B) {
+func BenchmarkUint32Decode32(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		svb.Uint32Decode128(masks, data, out)
-	}
-}
-
-func BenchmarkUint32Decode256(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		svb.Uint32Decode256(masks, data, out)
-	}
-}
-
-func BenchmarkUint32Decode512(b *testing.B) {
-	for n := 0; n < b.N; n++ {
-		svb.Uint32Decode512(masks, data, out)
+		svb.Uint32Decode32(masks, data, out)
 	}
 }

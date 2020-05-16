@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	decode128()
 	shuffle128()
 	shuffle256()
 	shuffle512()
@@ -26,6 +27,79 @@ func shuffle128() {
 	VMOVDQU(Mem{Base: dataPtr}, xmm)
 	PSHUFB(Mem{Base: shufflePtr}, xmm)
 	VMOVDQU(xmm, Mem{Base: outPtr})
+	RET()
+}
+
+func decode128() {
+	TEXT("Uint32Decode128", NOSPLIT, "func(masks, data []byte, out []uint32)")
+	Doc("Uint32Decode128 32 bits integer using XMM register, AVX")
+	masksPtr := Load(Param("masks").Base(), GP64())
+	masksLen := Load(Param("masks").Len(), GP64())
+	dataPtr := Load(Param("data").Base(), GP64())
+	outPtr := Load(Param("out").Base(), GP64())
+
+	condition := "condition"
+	increment := "increment"
+	done := "done"
+
+	Label("init")
+	Comment("i := 0")
+	i := GP64()
+	XORQ(i, i)
+
+	Comment("offset := 0")
+	offset := GP64()
+	XORQ(offset, offset)
+
+	Comment("shuffleTable = &ShuffleTable[256][16]")
+	shuffleTable := GP64()
+	LEAQ(NewDataAddr(Symbol{Name: "·ShuffleTable"}, 0), shuffleTable)
+
+	Comment("var lookup = &ShuffleTable[masks[i]]")
+	lookup := GP64()
+	JMP(LabelRef(condition))
+
+	// increment
+	Label(increment)
+	Comment("i++")
+	LEAQ(Mem{Base: i, Disp: 1}, i)
+
+	Label(condition)
+	Comment("i < len(masks)")
+	CMPQ(i, masksLen)
+	Comment("goto done if i >= len(masks)")
+	JGE(LabelRef(done))
+
+	Comment("body")
+	m := GP64()
+	Comment("m = masks[i]")
+	MOVBQZX(Mem{Base: masksPtr, Index: i, Scale: 1}, m)
+
+	Comment("lookup = &ShuffleTable[m][16]")
+	SHLQ(U8(4), m)
+	LEAQ(Mem{Base: shuffleTable, Index: m, Scale: 1}, lookup)
+
+	step := GP64()
+	MOVQ(i, step)
+	Comment("step = i * 4 (4 integers)")
+	SHLQ(U8(4), step)
+
+	xmm := XMM()
+	VMOVDQU(Mem{Base: dataPtr, Index: offset, Scale: 1}, xmm)
+	PSHUFB(Mem{Base: lookup}, xmm)
+	VMOVDQU(xmm, Mem{Base: outPtr, Index: step, Scale: 1})
+
+	Comment("m >>= 6, note: m << 4 earlier")
+	SHRL(U8(10), m.As32())
+	Comment("m += 12")
+	ADDW(U8(12), m.As16())
+	Comment("lookup = ShuffleTable[m][12 + m >> 6]")
+	MOVBQZX(Mem{Base: lookup, Index: m, Scale: 1}, lookup)
+	Comment("offset += ShuffleTable[m][12 + m >> 6] + 1")
+	LEAQ(Mem{Base: offset, Index: lookup, Scale: 1, Disp: 1}, offset)
+	JMP(LabelRef(increment))
+
+	Label(done)
 	RET()
 }
 

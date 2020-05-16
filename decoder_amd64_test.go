@@ -1,6 +1,7 @@
 package svb
 
 import (
+	"math/rand"
 	"reflect"
 	"testing"
 )
@@ -106,12 +107,17 @@ func TestEncodeDecode128Uint32(t *testing.T) {
 	}
 
 	t.Run("encode_decode", func(t *testing.T) {
-		encodeData := []uint32{1 << 28, 1 << 20, 1 << 12, 1 << 4}
-		mask, data := Uint32Encode(encodeData)
-		decodeData := make([]uint32, len(encodeData))
-		Uint32Decode128(mask, data, decodeData)
-		if !reflect.DeepEqual(decodeData, encodeData) {
-			t.Errorf("Encode = %v, Decode = %v", encodeData, decodeData)
+		want := make([]uint32, 30)
+		for k := 0; k < len(want); k++ {
+			want[k] = rand.Uint32() >> (31 & rand.Uint32())
+		}
+
+		masks, data = Uint32Encode(want)
+
+		got := make([]uint32, len(want))
+		Uint32Decode128(masks, data, got)
+		if !reflect.DeepEqual(want, want) {
+			t.Errorf("Encode = %v, Decode = %v", want, got)
 		}
 	})
 }
@@ -122,12 +128,17 @@ func TestEncodeDecode256Uint32(t *testing.T) {
 	}
 
 	t.Run("encode_decode", func(t *testing.T) {
-		encodeData := []uint32{1 << 28, 1 << 20, 1 << 12, 1 << 4, 1 << 28, 1 << 20, 1 << 12, 1 << 4}
-		mask, data := Uint32Encode(encodeData)
-		decodeData := make([]uint32, len(encodeData))
-		Uint32Decode256(mask, data, decodeData)
-		if !reflect.DeepEqual(decodeData, encodeData) {
-			t.Errorf("Encode = %v, Decode = %v", encodeData, decodeData)
+		want := make([]uint32, 30)
+		for k := 0; k < len(want); k++ {
+			want[k] = rand.Uint32() >> (31 & rand.Uint32())
+		}
+
+		masks, data = Uint32Encode(want)
+
+		got := make([]uint32, len(want))
+		Uint32Decode256(masks, data, got)
+		if !reflect.DeepEqual(want, want) {
+			t.Errorf("Encode = %v, Decode = %v", want, got)
 		}
 	})
 }

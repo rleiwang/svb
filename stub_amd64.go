@@ -2,6 +2,9 @@
 
 package svb
 
+// Uint32Decode128 32 bits integer using XMM register, AVX
+func Uint32Decode128(masks []byte, data []byte, out []uint32)
+
 // Shuffle 32 bits integer using XMM register, AVX
 func Shuffle128(shuffle []byte, data []byte, out []uint32)
 

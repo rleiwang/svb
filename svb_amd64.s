@@ -2,6 +2,68 @@
 
 #include "textflag.h"
 
+// func Uint32Decode128(masks []byte, data []byte, out []uint32)
+// Requires: AVX, SSSE3
+TEXT ·Uint32Decode128(SB), NOSPLIT, $0-72
+	MOVQ masks_base+0(FP), AX
+	MOVQ masks_len+8(FP), CX
+	MOVQ data_base+24(FP), DX
+	MOVQ out_base+48(FP), BX
+
+	// i := 0
+	XORQ BP, BP
+
+	// offset := 0
+	XORQ SI, SI
+
+	// shuffleTable = &ShuffleTable[256][16]
+	LEAQ ·ShuffleTable+0(SB), DI
+
+	// var lookup = &ShuffleTable[masks[i]]
+	JMP condition
+
+increment:
+	// i++
+	LEAQ 1(BP), BP
+
+condition:
+	// i < len(masks)
+	CMPQ BP, CX
+
+	// goto done if i >= len(masks)
+	JGE done
+
+	// body
+	// m = masks[i]
+	MOVBQZX (AX)(BP*1), R9
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R9
+	LEAQ (DI)(R9*1), R8
+	MOVQ BP, R10
+
+	// step = i * 4 (4 integers)
+	SHLQ    $0x04, R10
+	VMOVDQU (DX)(SI*1), X0
+	PSHUFB  (R8), X0
+	VMOVDQU X0, (BX)(R10*1)
+
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R9
+
+	// m += 12
+	ADDW $0x0c, R9
+
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R8)(R9*1), R8
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(SI)(R8*1), SI
+	JMP  increment
+
+done:
+	RET
+
 // func Shuffle128(shuffle []byte, data []byte, out []uint32)
 // Requires: AVX, SSSE3
 TEXT ·Shuffle128(SB), NOSPLIT, $0-72

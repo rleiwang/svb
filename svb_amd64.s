@@ -5,151 +5,189 @@
 // func Uint32Decode128(masks []byte, data []byte, out []uint32)
 // Requires: AVX, SSSE3
 TEXT ·Uint32Decode128(SB), NOSPLIT, $0-72
-	MOVQ masks_base+0(FP), AX
-	MOVQ masks_len+8(FP), CX
-	MOVQ data_base+24(FP), DX
-	MOVQ out_base+48(FP), BX
-
-	// i := 0
-	XORQ BP, BP
-
-	// offset := 0
-	XORQ SI, SI
-
 	// shuffleTable = &ShuffleTable[256][16]
-	LEAQ ·ShuffleTable+0(SB), DI
-
-	// var lookup = &ShuffleTable[masks[i]]
-	JMP condition
+	LEAQ ·ShuffleTable+0(SB), AX
+	MOVQ masks_base+0(FP), CX
+	MOVQ masks_len+8(FP), DX
+	MOVQ data_base+24(FP), BX
+	MOVQ out_base+48(FP), BP
+	XORQ SI, SI
+	XORQ R8, R8
+	XORQ R9, R9
+	JMP  condition
 
 increment:
 	// i++
-	LEAQ 1(BP), BP
+	LEAQ 1(SI), SI
 
 condition:
 	// i < len(masks)
-	CMPQ BP, CX
+	CMPQ SI, DX
 
 	// goto done if i >= len(masks)
 	JGE done
 
-	// body
 	// m = masks[i]
-	MOVBQZX (AX)(BP*1), R9
+	MOVBQZX (CX)(SI*1), R9
 
 	// lookup = &ShuffleTable[m][16]
 	SHLQ $0x04, R9
-	LEAQ (DI)(R9*1), R8
-	MOVQ BP, R10
+	LEAQ (AX)(R9*1), DI
+	MOVQ SI, R10
 
 	// step = i * 4 (4 integers)
-	SHLQ    $0x04, R10
-	VMOVDQU (DX)(SI*1), X0
-	PSHUFB  (R8), X0
-	VMOVDQU X0, (BX)(R10*1)
+	SHLQ    $0x02, R10
+	VMOVDQU (BX)(R8*1), X0
+	PSHUFB  (DI), X0
+	VMOVDQU X0, (BP)(R10*4)
 
 	// m >>= 6, note: m << 4 earlier
 	SHRL $0x0a, R9
 
 	// m += 12
-	ADDW $0x0c, R9
+	ADDL $0x0c, R9
 
 	// lookup = ShuffleTable[m][12 + m >> 6]
-	MOVBQZX (R8)(R9*1), R8
+	MOVBQZX (DI)(R9*1), DI
 
 	// offset += ShuffleTable[m][12 + m >> 6] + 1
-	LEAQ 1(SI)(R8*1), SI
+	LEAQ 1(R8)(DI*1), R8
 	JMP  increment
 
 done:
 	RET
 
-// func Shuffle128(shuffle []byte, data []byte, out []uint32)
-// Requires: AVX, SSSE3
-TEXT ·Shuffle128(SB), NOSPLIT, $0-72
-	MOVQ    shuffle_base+0(FP), AX
-	MOVQ    data_base+24(FP), CX
-	MOVQ    out_base+48(FP), DX
-	VMOVDQU (CX), X0
-	PSHUFB  (AX), X0
-	VMOVDQU X0, (DX)
-	RET
+// func Uint32Decode256(masks []byte, data []byte, out []uint32)
+// Requires: AVX, AVX2, SSSE3
+TEXT ·Uint32Decode256(SB), NOSPLIT, $0-72
+	// shuffleTable = &ShuffleTable[256][16]
+	LEAQ ·ShuffleTable+0(SB), AX
+	MOVQ masks_base+0(FP), CX
+	MOVQ masks_len+8(FP), DX
+	MOVQ data_base+24(FP), BX
+	MOVQ out_base+48(FP), BP
+	XORQ SI, SI
+	XORQ R8, R8
+	XORQ R9, R9
+	JMP  condition_0
 
-// func Shuffle256(masks []byte, data []byte, out []uint32) byte
-// Requires: AVX, AVX2
-TEXT ·Shuffle256(SB), NOSPLIT, $0-73
-	MOVQ masks_base+0(FP), AX
-	MOVQ data_base+24(FP), CX
-	MOVQ out_base+48(FP), DX
+increment_0:
+	// i += 2
+	LEAQ 2(SI), SI
 
-	// &ShuffleTable[256][16]
-	LEAQ ·ShuffleTable+0(SB), BX
+condition_0:
+	MOVQ DX, DI
+	SUBQ SI, DI
+	CMPQ DI, $0x02
 
-	// offset := 0
-	XORQ BP, BP
+	// goto done if i >= len(masks)
+	JLT  done_0
+	MOVQ SI, R10
+
+	// step = i * 4 (4 integers)
+	SHLQ $0x02, R10
 
 	// 0th DOUBLE QWORD
-	// r = masks[0] 
-	MOVBQZX (AX), SI
+	// m = masks[i]
+	MOVBQZX (CX)(SI*1), R9
 
-	// shuffle table is [256][16], offset *= 16, left shift 4 bits
-	SHLQ $0x04, SI
-
-	// R = &ShuffleTable[masks[0]]
-	LEAQ (BX)(SI*1), DI
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R9
+	LEAQ (AX)(R9*1), DI
 
 	// move 16 bytes from ShuffleTable[masks[0]] to 0 double qword
 	VINSERTF128 $0x00, (DI), Y0, Y0
 
 	// move 16 bytes from data[offset] to 0 double qword
-	VINSERTF128 $0x00, (CX)(BP*1), Y1, Y1
+	VINSERTF128 $0x00, (BX)(R8*1), Y1, Y1
 
-	// maskOffset >> 10, as m >> 6
-	SHRQ $0x0a, SI
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R9
 
 	// m += 12
-	LEAQ 12(SI), SI
+	ADDL $0x0c, R9
 
-	// v = ShuffleTable[key][12 + key >> 6]
-	MOVBQZX (DI)(SI*1), DI
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (DI)(R9*1), DI
 
-	// data offset += v + 1
-	LEAQ 1(DI)(BP*1), BP
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R8)(DI*1), R8
 
 	// 1th DOUBLE QWORD
-	// r = masks[1] 
-	MOVBQZX 1(AX), AX
+	// m = masks[i]
+	MOVBQZX 1(CX)(SI*1), R9
 
-	// shuffle table is [256][16], offset *= 16, left shift 4 bits
-	SHLQ $0x04, AX
-
-	// R = &ShuffleTable[masks[1]]
-	LEAQ (BX)(AX*1), BX
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R9
+	LEAQ (AX)(R9*1), DI
 
 	// move 16 bytes from ShuffleTable[masks[1]] to 1 double qword
-	VINSERTF128 $0x01, (BX), Y0, Y0
+	VINSERTF128 $0x01, (DI), Y0, Y0
 
 	// move 16 bytes from data[offset] to 1 double qword
-	VINSERTF128 $0x01, (CX)(BP*1), Y1, Y1
+	VINSERTF128 $0x01, (BX)(R8*1), Y1, Y1
 
-	// maskOffset >> 10, as m >> 6
-	SHRQ $0x0a, AX
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R9
 
 	// m += 12
-	LEAQ 12(AX), AX
+	ADDL $0x0c, R9
 
-	// v = ShuffleTable[key][12 + key >> 6]
-	MOVBQZX (BX)(AX*1), BX
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (DI)(R9*1), DI
 
-	// data offset += v + 1
-	LEAQ 1(BX)(BP*1), BP
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R8)(DI*1), R8
 
 	// shuffle 8 uint32
-	VPSHUFB Y0, Y1, Y0
+	VPSHUFB Y0, Y1, Y2
 
 	// move 8 uint32 to out
-	VMOVDQU Y0, (DX)
-	MOVB    BP, ret+72(FP)
+	VMOVDQU Y2, (BP)(R10*4)
+	JMP     increment_0
+
+done_0:
+	JMP condition_1
+
+increment_1:
+	// i++
+	LEAQ 1(SI), SI
+
+condition_1:
+	// i < len(masks)
+	CMPQ SI, DX
+
+	// goto done if i >= len(masks)
+	JGE done_1
+
+	// m = masks[i]
+	MOVBQZX (CX)(SI*1), R9
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R9
+	LEAQ (AX)(R9*1), DI
+	MOVQ SI, R10
+
+	// step = i * 4 (4 integers)
+	SHLQ    $0x02, R10
+	VMOVDQU (BX)(R8*1), X0
+	PSHUFB  (DI), X0
+	VMOVDQU X0, (BP)(R10*4)
+
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R9
+
+	// m += 12
+	ADDL $0x0c, R9
+
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (DI)(R9*1), DI
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R8)(DI*1), R8
+	JMP  increment_1
+
+done_1:
 	RET
 
 // func Shuffle512(masks []byte, data []byte, out []uint32) byte

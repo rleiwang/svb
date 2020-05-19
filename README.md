@@ -13,7 +13,7 @@ svb/perf ❯❯❯ go test -bench .
 
 |Function|Cascade Lake|Skylake|
 |---|---|---|
-|Uint32Decode32|12358406ns|17420943ns|
-|Uint32Decode128|1423395ns|1988929ns|
-|Uint32Decode256|1111386ns|1533913ns|
-|Uint32Decode512|810798ns|1095372ns|
+|Uint32Decode32|13562586ns|17394533ns|
+|Uint32Decode128|331368ns|411102ns|
+|Uint32Decode256|327100ns|406230ns|
+|Uint32Decode512|470571ns|569497ns|

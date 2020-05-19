@@ -12,8 +12,8 @@ TEXT ·Uint32Decode128(SB), NOSPLIT, $0-72
 	MOVQ data_base+24(FP), BX
 	MOVQ out_base+48(FP), BP
 	XORQ SI, SI
-	XORQ R8, R8
 	XORQ R9, R9
+	XORQ R8, R8
 	JMP  condition
 
 increment:
@@ -67,8 +67,8 @@ TEXT ·Uint32Decode256(SB), NOSPLIT, $0-72
 	MOVQ data_base+24(FP), BX
 	MOVQ out_base+48(FP), BP
 	XORQ SI, SI
-	XORQ R8, R8
 	XORQ R9, R9
+	XORQ R8, R8
 	JMP  condition_0
 
 increment_0:
@@ -190,134 +190,198 @@ condition_1:
 done_1:
 	RET
 
-// func Shuffle512(masks []byte, data []byte, out []uint32) byte
-TEXT ·Shuffle512(SB), NOSPLIT, $0-73
+// func Uint32Decode512(masks []byte, data []byte, out []uint32)
+// Requires: AVX, SSSE3
+TEXT ·Uint32Decode512(SB), NOSPLIT, $0-72
+	// shuffleTable = &ShuffleTable[256][16]
+	LEAQ ·ShuffleTable+0(SB), DX
 	MOVQ masks_base+0(FP), AX
-	MOVQ data_base+24(FP), BX
-	MOVQ out_base+48(FP), CX
+	MOVQ masks_len+8(FP), BX
+	MOVQ data_base+24(FP), SI
+	MOVQ out_base+48(FP), DI
+	XORQ R10, R10
+	XORQ R13, R13
+	XORQ R12, R12
+	JMP  condition_0
 
-	// Clear data offset, R8
-	XORQ R8, R8
+increment_0:
+	// i += 4
+	LEAQ 4(R10), R10
+
+condition_0:
+	MOVQ BX, CX
+	SUBQ R10, CX
+	CMPQ CX, $0x04
+
+	// goto done if i >= len(masks)
+	JLT  done_0
+	MOVQ R10, R8
+
+	// step = i * 4 (4 integers)
+	SHLQ $0x02, R8
 
 	// init R9W expand mask 00000011
 	MOVW $0x0003, R9
 
-	// DX = &ShuffleTable[256][16]
-	LEAQ ·ShuffleTable+0(SB), DX
-
 	// 0th DOUBLE QWORD
+	// m = masks[i]
+	MOVBQZX (AX)(R10*1), R13
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R13
+	LEAQ (DX)(R13*1), R11
+
 	// AVX512, K1 = 00000011
 	KMOVW R9, K1
 	// AVX512, Move data[offset:] to Z0 with mask 00000011
-	VPEXPANDQ (BX)(R8*1), K1, Z0
-	// SI = masks[0]
-	MOVBQZX (AX), SI
-
-	// << 4 bits, 16 bytes offset, ShuffleTable[256][16]
-	SHLQ $0x04, SI
-
-	// R10 = ShuffleTable[mask[0]]
-	LEAQ (DX)(SI*1), R10
-
+	VPEXPANDQ (SI)(R12*1), K1, Z0
 	// AVX512, Move ShuffleTable[masks[0]] to Z1 with mask 00000011  
-	VPEXPANDQ (R10), K1, Z1
-	// SI >> 10, as m >> 6
-	SHRQ $0x0a, SI
+	VPEXPANDQ (R11), K1, Z1
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R13
 
-	// R11 = ShuffleTable[SI][12+SI>>6], SI = masks[0]
-	MOVBQZX 12(R10)(SI*1), R11
+	// m += 12
+	ADDL $0x0c, R13
 
-	// data offset += R11 + 1
-	LEAQ 1(R11)(R8*1), R8
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R11)(R13*1), R11
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R12)(R11*1), R12
 
 	// 1th DOUBLE QWORD
 	// expand mask R9 << 2, 00001100
 	SHLW $0x02, R9
 
+	// m = masks[i]
+	MOVBQZX 1(AX)(R10*1), R13
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R13
+	LEAQ (DX)(R13*1), R11
+
 	// AVX512, K1 = 00001100
 	KMOVW R9, K1
 	// AVX512, Move data[offset:] to Z0 with mask 00001100
-	VPEXPANDQ (BX)(R8*1), K1, Z0
-	// SI = masks[1]
-	MOVBQZX 1(AX), SI
-
-	// << 4 bits, 16 bytes offset, ShuffleTable[256][16]
-	SHLQ $0x04, SI
-
-	// R10 = ShuffleTable[mask[1]]
-	LEAQ (DX)(SI*1), R10
-
+	VPEXPANDQ (SI)(R12*1), K1, Z0
 	// AVX512, Move ShuffleTable[masks[1]] to Z1 with mask 00001100  
-	VPEXPANDQ (R10), K1, Z1
-	// SI >> 10, as m >> 6
-	SHRQ $0x0a, SI
+	VPEXPANDQ (R11), K1, Z1
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R13
 
-	// R11 = ShuffleTable[SI][12+SI>>6], SI = masks[1]
-	MOVBQZX 12(R10)(SI*1), R11
+	// m += 12
+	ADDL $0x0c, R13
 
-	// data offset += R11 + 1
-	LEAQ 1(R11)(R8*1), R8
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R11)(R13*1), R11
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R12)(R11*1), R12
 
 	// 2th DOUBLE QWORD
 	// expand mask R9 << 2, 00110000
 	SHLW $0x02, R9
 
+	// m = masks[i]
+	MOVBQZX 2(AX)(R10*1), R13
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R13
+	LEAQ (DX)(R13*1), R11
+
 	// AVX512, K1 = 00110000
 	KMOVW R9, K1
 	// AVX512, Move data[offset:] to Z0 with mask 00110000
-	VPEXPANDQ (BX)(R8*1), K1, Z0
-	// SI = masks[2]
-	MOVBQZX 2(AX), SI
-
-	// << 4 bits, 16 bytes offset, ShuffleTable[256][16]
-	SHLQ $0x04, SI
-
-	// R10 = ShuffleTable[mask[2]]
-	LEAQ (DX)(SI*1), R10
-
+	VPEXPANDQ (SI)(R12*1), K1, Z0
 	// AVX512, Move ShuffleTable[masks[2]] to Z1 with mask 00110000  
-	VPEXPANDQ (R10), K1, Z1
-	// SI >> 10, as m >> 6
-	SHRQ $0x0a, SI
+	VPEXPANDQ (R11), K1, Z1
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R13
 
-	// R11 = ShuffleTable[SI][12+SI>>6], SI = masks[2]
-	MOVBQZX 12(R10)(SI*1), R11
+	// m += 12
+	ADDL $0x0c, R13
 
-	// data offset += R11 + 1
-	LEAQ 1(R11)(R8*1), R8
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R11)(R13*1), R11
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R12)(R11*1), R12
 
 	// 3th DOUBLE QWORD
 	// expand mask R9 << 2, 11000000
 	SHLW $0x02, R9
 
+	// m = masks[i]
+	MOVBQZX 3(AX)(R10*1), R13
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R13
+	LEAQ (DX)(R13*1), R11
+
 	// AVX512, K1 = 11000000
 	KMOVW R9, K1
 	// AVX512, Move data[offset:] to Z0 with mask 11000000
-	VPEXPANDQ (BX)(R8*1), K1, Z0
-	// SI = masks[3]
-	MOVBQZX 3(AX), SI
-
-	// << 4 bits, 16 bytes offset, ShuffleTable[256][16]
-	SHLQ $0x04, SI
-
-	// R10 = ShuffleTable[mask[3]]
-	LEAQ (DX)(SI*1), R10
-
+	VPEXPANDQ (SI)(R12*1), K1, Z0
 	// AVX512, Move ShuffleTable[masks[3]] to Z1 with mask 11000000  
-	VPEXPANDQ (R10), K1, Z1
-	// SI >> 10, as m >> 6
-	SHRQ $0x0a, SI
+	VPEXPANDQ (R11), K1, Z1
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R13
 
-	// R11 = ShuffleTable[SI][12+SI>>6], SI = masks[3]
-	MOVBQZX 12(R10)(SI*1), R11
+	// m += 12
+	ADDL $0x0c, R13
 
-	// data offset += R11 + 1
-	LEAQ 1(R11)(R8*1), R8
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R11)(R13*1), R11
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R12)(R11*1), R12
 
 	// AVX512, shuffle 16 uint32
 	VPSHUFB Z1, Z0, Z2
 	// AVX512, Copy 16 uint32 to out
-	VMOVDQU8 Z2, (CX)
-	// Return processed data length
-	MOVB R8, ret+72(FP)
+	VMOVDQU8 Z2, (DI)(R8*4)
+	JMP increment_0
+
+done_0:
+	JMP condition_1
+
+increment_1:
+	// i++
+	LEAQ 1(R10), R10
+
+condition_1:
+	// i < len(masks)
+	CMPQ R10, BX
+
+	// goto done if i >= len(masks)
+	JGE done_1
+
+	// m = masks[i]
+	MOVBQZX (AX)(R10*1), R13
+
+	// lookup = &ShuffleTable[m][16]
+	SHLQ $0x04, R13
+	LEAQ (DX)(R13*1), R11
+	MOVQ R10, CX
+
+	// step = i * 4 (4 integers)
+	SHLQ    $0x02, CX
+	VMOVDQU (SI)(R12*1), X0
+	PSHUFB  (R11), X0
+	VMOVDQU X0, (DI)(CX*4)
+
+	// m >>= 6, note: m << 4 earlier
+	SHRL $0x0a, R13
+
+	// m += 12
+	ADDL $0x0c, R13
+
+	// lookup = ShuffleTable[m][12 + m >> 6]
+	MOVBQZX (R11)(R13*1), R11
+
+	// offset += ShuffleTable[m][12 + m >> 6] + 1
+	LEAQ 1(R12)(R11*1), R12
+	JMP  increment_1
+
+done_1:
 	RET

@@ -11,7 +11,7 @@ import (
 func main() {
 	decode128()
 	decode256()
-	shuffle512()
+	decode512()
 
 	Generate()
 }
@@ -117,10 +117,65 @@ func (y *ymmVector) body(m, i GP, lookup, offset Register, increment LabelRef) {
 	JMP(increment)
 }
 
-func zeroGP() GPVirtual {
-	v := GP64()
-	XORQ(v, v)
-	return v
+type zmmVector struct {
+	registers
+}
+
+func (z *zmmVector) incr(i GP) {
+	Comment("i += 4")
+	LEAQ(Mem{Base: i.As64(), Disp: 4}, i.As64())
+}
+
+func (z *zmmVector) cond(i GP, done LabelRef) {
+	diff := GP64()
+	MOVQ(z.masks.len, diff)
+	SUBQ(i.As64(), diff)
+	CMPQ(diff, U8(4))
+	Comment("goto done if i >= len(masks)")
+	JLT(done)
+}
+
+func (z *zmmVector) body(m, i GP, lookup, offset Register, increment LabelRef) {
+	step := R8
+	MOVQ(i.As64(), step)
+	Comment("step = i * 4 (4 integers)")
+	SHLQ(U8(2), step)
+
+	expMask := R9W
+	three := 3
+	Commentf("init R9W expand mask %08b", three)
+	MOVW(U16(three), expMask)
+
+	for k := 0; k < 4; k++ {
+		Commentf("%dth DOUBLE QWORD", k)
+		if k > 0 {
+			three <<= 2
+			Commentf("expand mask R9 << 2, %08b", three)
+			SHLW(U8(2), expMask)
+		}
+
+		getMask(m, i, z.masks.ptr, k)
+		lookupShuffleMasks(lookup, z.table, m)
+
+		Commentf(`AVX512, K1 = %08b
+	KMOVW R9, K1`, three)
+
+		Commentf(`AVX512, Move data[offset:] to Z0 with mask %08b
+	VPEXPANDQ (SI)(R12*1), K1, Z0`, three)
+
+		Commentf(`AVX512, Move ShuffleTable[masks[%d]] to Z1 with mask %08b  
+	VPEXPANDQ (R11), K1, Z1`, k, three)
+
+		incrementOffset(m, lookup, offset)
+	}
+
+	Comment(`AVX512, shuffle 16 uint32
+	VPSHUFB Z1, Z0, Z2`)
+
+	Comment(`AVX512, Copy 16 uint32 to out
+	VMOVDQU8 Z2, (DI)(R8*4)`)
+
+	JMP(increment)
 }
 
 func getMask(m, i GP, masks Register, d int) {
@@ -128,9 +183,8 @@ func getMask(m, i GP, masks Register, d int) {
 	MOVBQZX(Mem{Disp: d, Base: masks, Index: i.As64(), Scale: 1}, m.As64())
 }
 
-func getShuffleTable() Register {
+func getShuffleTable(shuffleTable Register) Register {
 	Comment("shuffleTable = &ShuffleTable[256][16]")
-	shuffleTable := GP64()
 	LEAQ(NewDataAddr(Symbol{Name: "·ShuffleTable"}, 0), shuffleTable)
 	return shuffleTable
 }
@@ -174,80 +228,12 @@ func loop(suffix string, i, m GP, lookup, offset Register, vsf vectorShuffle) {
 	Label(done)
 }
 
-func shuffle512() {
-	TEXT("Shuffle512", NOSPLIT, "func(masks, data []byte, out []uint32) byte")
-	Doc("Shuffle 32 bits integer using ZMM register, AVX512")
-	// use physical register since avo doesn't support AVX512 yet
-	masksPtr := Load(Param("masks").Base(), RAX)
-	Load(Param("data").Base(), RBX)
-	Load(Param("out").Base(), RCX)
-
-	//_, _, _ = ZMM(), ZMM(), ZMM()
-	offset := R8
-	Comment("Clear data offset, R8")
-	XORQ(offset, offset)
-
-	expMask := R9W
-	three := 3
-	Commentf("init R9W expand mask %08b", three)
-	MOVW(U16(three), expMask)
-
-	shuffleTable := RDX
-	Comment("DX = &ShuffleTable[256][16]")
-	LEAQ(NewDataAddr(Symbol{Name: "·ShuffleTable"}, 0), Mem{Base: shuffleTable}.Base)
-
-	si, st := RSI, R10
-	for i := 0; i < 4; i++ {
-		Commentf("%dth DOUBLE QWORD", i)
-		if i > 0 {
-			three <<= 2
-			Commentf("expand mask R9 << 2, %08b", three)
-			SHLW(U8(2), expMask)
-		}
-
-		Commentf(`AVX512, K1 = %08b
-	KMOVW R9, K1`, three)
-
-		Commentf(`AVX512, Move data[offset:] to Z0 with mask %08b
-	VPEXPANDQ (BX)(R8*1), K1, Z0`, three)
-
-		Commentf("SI = masks[%d]", i)
-		MOVBQZX(Mem{Base: masksPtr, Disp: i}, si)
-		Comment("<< 4 bits, 16 bytes offset, ShuffleTable[256][16]")
-		SHLQ(U8(4), si)
-		Commentf("R10 = ShuffleTable[mask[%d]]", i)
-		LEAQ(Mem{Base: shuffleTable, Index: si, Scale: 1}, st)
-
-		Commentf(`AVX512, Move ShuffleTable[masks[%d]] to Z1 with mask %08b  
-	VPEXPANDQ (R10), K1, Z1`, i, three)
-
-		Comment("SI >> 10, as m >> 6")
-		SHRQ(U8(10), si)
-		tmp := R11
-		Commentf("R11 = ShuffleTable[SI][12+SI>>6], SI = masks[%d]", i)
-		MOVBQZX(Mem{Base: st, Index: si, Disp: 12, Scale: 1}, tmp)
-
-		Comment("data offset += R11 + 1")
-		LEAQ(Mem{Base: tmp, Index: offset, Scale: 1, Disp: 1}, offset)
-	}
-
-	Comment(`AVX512, shuffle 16 uint32
-	VPSHUFB Z1, Z0, Z2`)
-
-	Comment(`AVX512, Copy 16 uint32 to out
-	VMOVDQU8 Z2, (CX)`)
-
-	Comment("Return processed data length")
-	Store(offset.As8(), ReturnIndex(0))
-	RET()
-}
-
 func decode128() {
 	TEXT("Uint32Decode128", NOSPLIT, "func(masks, data []byte, out []uint32)")
 	Doc("Uint32Decode128 32 bits integer using XMM register, AVX")
 
 	xmm := xmmVector{registers{
-		table: getShuffleTable(),
+		table: getShuffleTable(GP64()),
 		masks: slice{
 			ptr: Load(Param("masks").Base(), GP64()),
 			len: Load(Param("masks").Len(), GP64()),
@@ -256,10 +242,14 @@ func decode128() {
 		out:  slice{ptr: Load(Param("out").Base(), GP64())},
 	}}
 
-	i := zeroGP()
+	i := GP64()
 	lookup := GP64()
-	offset := zeroGP()
-	m := zeroGP()
+	offset := GP64()
+	m := GP64()
+
+	XORQ(i, i)
+	XORQ(m, m)
+	XORQ(offset, offset)
 
 	loop("", i, m, lookup, offset, &xmm)
 	RET()
@@ -270,7 +260,7 @@ func decode256() {
 	Doc("Uint32Decode256 32 bits integer using YMM register, AVX2")
 
 	ymm := ymmVector{registers{
-		table: getShuffleTable(),
+		table: getShuffleTable(GP64()),
 		masks: slice{
 			ptr: Load(Param("masks").Base(), GP64()),
 			len: Load(Param("masks").Len(), GP64()),
@@ -279,14 +269,52 @@ func decode256() {
 		out:  slice{ptr: Load(Param("out").Base(), GP64())},
 	}}
 
-	i := zeroGP()
+	i := GP64()
 	lookup := GP64()
-	offset := zeroGP()
-	m := zeroGP()
+	offset := GP64()
+	m := GP64()
+
+	XORQ(i, i)
+	XORQ(m, m)
+	XORQ(offset, offset)
 
 	loop("_0", i, m, lookup, offset, &ymm)
 
 	xmm := xmmVector{ymm.registers}
+	loop("_1", i, m, lookup, offset, &xmm)
+
+	RET()
+}
+
+func decode512() {
+	TEXT("Uint32Decode512", NOSPLIT, "func(masks, data []byte, out []uint32)")
+	Doc("Uint32Decode512 32 bits integer using ZMM register, AVX512")
+
+	// use physical register since avo doesn't support AVX512 yet
+
+	zmm := zmmVector{registers{
+		table: getShuffleTable(RDX),
+		masks: slice{
+			ptr: Load(Param("masks").Base(), RAX),
+			len: Load(Param("masks").Len(), RBX),
+		},
+		data: slice{ptr: Load(Param("data").Base(), RSI)},
+		out:  slice{ptr: Load(Param("out").Base(), RDI)},
+	}}
+
+	// R8, R9
+	i := R10
+	lookup := R11
+	offset := R12
+	m := R13
+
+	XORQ(i, i)
+	XORQ(m, m)
+	XORQ(offset, offset)
+
+	loop("_0", i, m, lookup, offset, &zmm)
+
+	xmm := xmmVector{zmm.registers}
 	loop("_1", i, m, lookup, offset, &xmm)
 
 	RET()

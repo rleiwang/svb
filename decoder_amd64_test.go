@@ -142,3 +142,24 @@ func TestEncodeDecode256Uint32(t *testing.T) {
 		}
 	})
 }
+
+func TestEncodeDecode512Uint32(t *testing.T) {
+	if !HasZmm() {
+		t.SkipNow()
+	}
+
+	t.Run("encode_decode", func(t *testing.T) {
+		want := make([]uint32, 63)
+		for k := 0; k < len(want); k++ {
+			want[k] = rand.Uint32() >> (31 & rand.Uint32())
+		}
+
+		masks, data = Uint32Encode(want)
+
+		got := make([]uint32, len(want))
+		Uint32Decode512(masks, data, got)
+		if !reflect.DeepEqual(want, got) {
+			t.Errorf("Encode = %v, Decode = %v", want, got)
+		}
+	})
+}

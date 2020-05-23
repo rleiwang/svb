@@ -4,11 +4,16 @@ package main
 
 import (
 	. "github.com/mmcloughlin/avo/build"
+	"github.com/mmcloughlin/avo/buildtags"
 	. "github.com/mmcloughlin/avo/operand"
 	. "github.com/mmcloughlin/avo/reg"
 )
 
 func main() {
+	Constraint(buildtags.Not("noasm").ToConstraint())
+	Constraint(buildtags.Not("appengine").ToConstraint())
+	Constraint(buildtags.Not("gccgo").ToConstraint())
+
 	decode128()
 	decode256()
 	decode512()
